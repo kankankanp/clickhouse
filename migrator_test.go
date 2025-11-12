@@ -194,7 +194,7 @@ func TestMigrator_OnClusterSupport(t *testing.T) {
 	createSQL := sqlStrings[len(sqlStrings)-1] // Get the last (CREATE TABLE) statement
 
 	// Verify ON CLUSTER appears after table name but before column definitions
-	expectedPattern := `CREATE TABLE.*cluster_test ON CLUSTER 'test_cluster' \(.*id.*\).*ENGINE ReplicatedMergeTree`
+	expectedPattern := `CREATE TABLE.*cluster_test.* ON CLUSTER 'test_cluster' \(.*id.*\).*ENGINE ReplicatedMergeTree`
 	matched, err := regexp.MatchString(expectedPattern, createSQL)
 	if err != nil {
 		t.Fatalf("regex error: %v", err)

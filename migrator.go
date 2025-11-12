@@ -251,7 +251,7 @@ func (m Migrator) AddColumn(value interface{}, field string) error {
 	return m.RunWithValue(value, func(stmt *gorm.Statement) error {
 		if field := stmt.Schema.LookUpField(field); field != nil {
 			clusterOpts := m.extractClusterOption()
-			sQL := fmt.Sprintf("ALTER TABLE ?%sADD COLUMN ? ?", clusterOpts)
+			sQL := fmt.Sprintf("ALTER TABLE ?%s ADD COLUMN ? ?", clusterOpts)
 			return m.DB.Exec(
 				sQL,
 				clause.Table{Name: stmt.Table}, clause.Column{Name: field.DBName},
@@ -268,7 +268,7 @@ func (m Migrator) DropColumn(value interface{}, name string) error {
 			name = field.DBName
 		}
 		clusterOpts := m.extractClusterOption()
-		sQL := fmt.Sprintf("ALTER TABLE ?%sDROP COLUMN ?", clusterOpts)
+		sQL := fmt.Sprintf("ALTER TABLE ?%s DROP COLUMN ?", clusterOpts)
 		return m.DB.Exec(
 			sQL,
 			clause.Table{Name: stmt.Table}, clause.Column{Name: name},
@@ -279,8 +279,26 @@ func (m Migrator) DropColumn(value interface{}, name string) error {
 func (m Migrator) AlterColumn(value interface{}, field string) error {
 	return m.RunWithValue(value, func(stmt *gorm.Statement) error {
 		if field := stmt.Schema.LookUpField(field); field != nil {
+			// When DontSupportEmptyDefaultValue is true and this is just a type check,
+			// skip the alteration if the column already exists
+			if m.Dialector.DontSupportEmptyDefaultValue {
+				// Check if column exists and has the same basic type
+				columnTypes, err := m.ColumnTypes(value)
+				if err == nil {
+					for _, col := range columnTypes {
+						if col.Name() == field.DBName {
+							expectedType := m.Migrator.DataTypeOf(field)
+							if col.DatabaseTypeName() == expectedType {
+								// Types match, no need to alter
+								return nil
+							}
+						}
+					}
+				}
+			}
+			
 			clusterOpts := m.extractClusterOption()
-			sQL := fmt.Sprintf("ALTER TABLE ?%sMODIFY COLUMN ? ?", clusterOpts)
+			sQL := fmt.Sprintf("ALTER TABLE ?%s MODIFY COLUMN ? ?", clusterOpts)
 			return m.DB.Exec(
 				sQL,
 				clause.Table{Name: stmt.Table},
@@ -308,7 +326,7 @@ func (m Migrator) RenameColumn(value interface{}, oldName, newName string) error
 			}
 			if field != nil {
 				clusterOpts := m.extractClusterOption()
-				sQL := fmt.Sprintf("ALTER TABLE ?%sRENAME COLUMN ? TO ?", clusterOpts)
+				sQL := fmt.Sprintf("ALTER TABLE ?%s RENAME COLUMN ? TO ?", clusterOpts)
 				return m.DB.Exec(
 					sQL,
 					clause.Table{Name: stmt.Table},
@@ -417,7 +435,7 @@ func (m Migrator) ColumnTypes(value interface{}) ([]gorm.ColumnType, error) {
 				column.DefaultValueValue.String = strings.Trim(column.DefaultValueValue.String, "'")
 			}
 
-			if m.Dialector.DontSupportEmptyDefaultValue && column.DefaultValueValue.String == "" {
+			if m.Dialector.DontSupportEmptyDefaultValue && strings.TrimSpace(column.DefaultValueValue.String) == "" {
 				column.DefaultValueValue.Valid = false
 			}
 
