@@ -29,7 +29,7 @@ type Migrator struct {
 
 // extractClusterOption extracts ON CLUSTER clause from table options
 func (m Migrator) extractClusterOption() string {
-	// gorm:table_optionsからON CLUSTERを抽出
+	// Extract ON CLUSTER from gorm:table_options
 	if tableOption, ok := m.DB.Get("gorm:table_options"); ok {
 		tableOpts := fmt.Sprint(tableOption)
 		re := regexp.MustCompile(`ON CLUSTER (?:'([^']+)'|([^\s]+))`)
@@ -38,7 +38,7 @@ func (m Migrator) extractClusterOption() string {
 			return " " + clusterMatch + " "
 		}
 	}
-	// 従来のgorm:table_cluster_optionsもサポート（後方互換性のため）
+	// Also support legacy gorm:table_cluster_options (for backward compatibility)
 	if clusterOption, ok := m.DB.Get("gorm:table_cluster_options"); ok {
 		return " " + fmt.Sprint(clusterOption) + " "
 	}
@@ -179,7 +179,7 @@ func (m Migrator) CreateTable(models ...interface{}) error {
 			clusterOpts := ""
 			if hasTableOption {
 				tableOpts := fmt.Sprint(tableOption)
-				// ON CLUSTER 部分だけ分離 (クォートありなし両方対応)
+				// Isolate only the ON CLUSTER part (support both quoted and unquoted)
 				re := regexp.MustCompile(`ON CLUSTER (?:'([^']+)'|([^\s]+))`)
 				clusterMatch := re.FindString(tableOpts)
 				if clusterMatch != "" {
@@ -190,7 +190,7 @@ func (m Migrator) CreateTable(models ...interface{}) error {
 				engineOpts = tableOpts
 			}
 
-			// 従来の gorm:table_cluster_options もサポート（後方互換性のため）
+			// Also support legacy gorm:table_cluster_options (for backward compatibility)
 			if clusterOption, ok := m.DB.Get("gorm:table_cluster_options"); ok {
 				if clusterOpts == "" {
 					clusterOpts = " " + fmt.Sprint(clusterOption) + " "
