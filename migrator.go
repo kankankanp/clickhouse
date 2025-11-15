@@ -27,20 +27,45 @@ type Migrator struct {
 	Dialector
 }
 
+// isolateClusterOption splits ON CLUSTER clause from raw table options
+func isolateClusterOption(tableOpts string) (clusterOpts, cleanedOpts string) {
+	cleanedOpts = tableOpts
+	if tableOpts == "" {
+		return
+	}
+	re := regexp.MustCompile(`ON CLUSTER (?:'([^']+)'|([^\s]+))`)
+	clusterMatch := re.FindString(tableOpts)
+	if clusterMatch == "" {
+		return
+	}
+	clusterOpts = formatClusterClause(clusterMatch)
+	cleanedOpts = strings.TrimSpace(strings.Replace(tableOpts, clusterMatch, "", 1))
+	return
+}
+
+// formatClusterClause ensures ON CLUSTER clause begins with a single space and has no trailing space
+func formatClusterClause(cluster string) string {
+	clause := strings.TrimSpace(cluster)
+	if clause == "" {
+		return ""
+	}
+	if !strings.HasPrefix(clause, " ") {
+		clause = " " + clause
+	}
+	return clause
+}
+
 // extractClusterOption extracts ON CLUSTER clause from table options
 func (m Migrator) extractClusterOption() string {
 	// Extract ON CLUSTER from gorm:table_options
 	if tableOption, ok := m.DB.Get("gorm:table_options"); ok {
-		tableOpts := fmt.Sprint(tableOption)
-		re := regexp.MustCompile(`ON CLUSTER (?:'([^']+)'|([^\s]+))`)
-		clusterMatch := re.FindString(tableOpts)
-		if clusterMatch != "" {
-			return " " + clusterMatch + " "
+		if clusterOpts, _ := isolateClusterOption(fmt.Sprint(tableOption)); clusterOpts != "" {
+			return clusterOpts
 		}
 	}
 	// Also support legacy gorm:table_cluster_options (for backward compatibility)
 	if clusterOption, ok := m.DB.Get("gorm:table_cluster_options"); ok {
-		return " " + fmt.Sprint(clusterOption) + " "
+		return formatClusterClause(fmt.Sprint(clusterOption))
 	}
 	return ""
 }
@@ -179,15 +204,9 @@ func (m Migrator) CreateTable(models ...interface{}) error {
 			clusterOpts := ""
 			if hasTableOption {
 				tableOpts := fmt.Sprint(tableOption)
-				// Isolate only the ON CLUSTER part (support both quoted and unquoted)
-				re := regexp.MustCompile(`ON CLUSTER (?:'([^']+)'|([^\s]+))`)
-				clusterMatch := re.FindString(tableOpts)
-				if clusterMatch != "" {
-					clusterOpts = " " + clusterMatch
-					tableOpts = strings.Replace(tableOpts, clusterMatch, "", 1)
-					tableOpts = strings.TrimSpace(tableOpts)
-				}
-				engineOpts = tableOpts
+				var cleanedOpts string
+				clusterOpts, cleanedOpts = isolateClusterOption(tableOpts)
+				engineOpts = cleanedOpts
 			}
 
 			// Also support legacy gorm:table_cluster_options (for backward compatibility)
@@ -279,24 +298,6 @@ func (m Migrator) DropColumn(value interface{}, name string) error {
 func (m Migrator) AlterColumn(value interface{}, field string) error {
 	return m.RunWithValue(value, func(stmt *gorm.Statement) error {
 		if field := stmt.Schema.LookUpField(field); field != nil {
-			// When DontSupportEmptyDefaultValue is true and this is just a type check,
-			// skip the alteration if the column already exists
-			if m.Dialector.DontSupportEmptyDefaultValue {
-				// Check if column exists and has the same basic type
-				columnTypes, err := m.ColumnTypes(value)
-				if err == nil {
-					for _, col := range columnTypes {
-						if col.Name() == field.DBName {
-							expectedType := m.Migrator.DataTypeOf(field)
-							if col.DatabaseTypeName() == expectedType {
-								// Types match, no need to alter
-								return nil
-							}
-						}
-					}
-				}
-			}
-			
 			clusterOpts := m.extractClusterOption()
 			sQL := fmt.Sprintf("ALTER TABLE ?%s MODIFY COLUMN ? ?", clusterOpts)
 			return m.DB.Exec(
@@ -435,7 +436,7 @@ func (m Migrator) ColumnTypes(value interface{}) ([]gorm.ColumnType, error) {
 				column.DefaultValueValue.String = strings.Trim(column.DefaultValueValue.String, "'")
 			}
 
-			if m.Dialector.DontSupportEmptyDefaultValue && strings.TrimSpace(column.DefaultValueValue.String) == "" {
+			if m.Dialector.DontSupportEmptyDefaultValue && column.DefaultValueValue.String == "" {
 				column.DefaultValueValue.Valid = false
 			}
 

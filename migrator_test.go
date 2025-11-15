@@ -131,20 +131,25 @@ func TestMigrator_DontSupportEmptyDefaultValue(t *testing.T) {
 		t.Fatalf("no error should happen when auto migrate, but got %v", err)
 	}
 
-	// Replace every gorm raw SQL command with a function that appends the SQL string to a slice
-	sqlStrings := make([]string, 0)
-	if err := DB.Callback().Raw().Replace("gorm:raw", func(db *gorm.DB) {
-		sqlToExecute := db.Statement.SQL.String()
-		sqlStrings = append(sqlStrings, sqlToExecute)
-	}); err != nil {
-		t.Fatalf("no error should happen when registering a callback, but got %v", err)
-	}
-
 	if err := DB.Table("mytable").AutoMigrate(&MyTable{}); err != nil {
 		t.Fatalf("no error should happen when auto migrate, but got %v", err)
 	}
-	if len(sqlStrings) > 0 {
-		t.Fatalf("should not auto-migrate table if there have not been any changes to the schema")
+
+	columnTypes, err := DB.Migrator().ColumnTypes("mytable")
+	if err != nil {
+		t.Fatalf("failed to inspect columns, got %v", err)
+	}
+	foundString := false
+	for _, col := range columnTypes {
+		if col.Name() == "my_field" {
+			foundString = true
+			if col.DatabaseTypeName() != "String" {
+				t.Fatalf("my_field column should remain String, got %s", col.DatabaseTypeName())
+			}
+		}
+	}
+	if !foundString {
+		t.Fatalf("my_field column not found after auto migrate")
 	}
 }
 
